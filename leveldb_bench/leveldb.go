@@ -15,7 +15,7 @@ func (db *DB) Put(key, value []byte) error {
 }
 
 func NewLevelDB() *DB {
-	dbPath := "tmp/leveldb_bench"
+	dbPath := "/tmp/leveldb_bench"
 	utils.CleanDB(dbPath)
 	opts := &opt.Options{}
 	db, err := leveldb.OpenFile(dbPath, opts)

@@ -4,6 +4,7 @@ import (
 	"db_bench/boltdb_bench"
 	"db_bench/leveldb_bench"
 	"db_bench/nutsdb_bench"
+	"db_bench/pebbledb_bench"
 	"db_bench/utils"
 	"flag"
 	"fmt"
@@ -15,6 +16,8 @@ import (
 
 var gDB string
 var gNum int
+var gValueSize int
+var gKeySize int
 
 type KeyBuffer struct {
 	buffer_ [1024]byte
@@ -27,11 +30,11 @@ func (kb *KeyBuffer) Set(k int) {
 }
 
 func (kb KeyBuffer) Slice() []byte {
-	return kb.buffer_[kb.kPrefix : kb.kPrefix+16]
+	return kb.buffer_[kb.kPrefix : kb.kPrefix+gKeySize]
 }
 
 func (kb KeyBuffer) String() string {
-	bytes := kb.buffer_[kb.kPrefix : kb.kPrefix+16]
+	bytes := kb.buffer_[kb.kPrefix : kb.kPrefix+gKeySize]
 	sliceHeader := (*reflect.SliceHeader)(unsafe.Pointer(&bytes))
 	stringHeader := reflect.StringHeader{Data: sliceHeader.Data, Len: sliceHeader.Len}
 	return *(*string)(unsafe.Pointer(&stringHeader))
@@ -56,7 +59,7 @@ func benchBoltDB() {
 	nums := gNum
 
 	keyBuffer := NewKeyBuffer(0)
-	valueSize := 100
+	valueSize := gValueSize
 
 	var bytes int64
 	tx, err := db.Begin()
@@ -92,7 +95,7 @@ func benchNutsDB() {
 	nums := gNum
 
 	keyBuffer := NewKeyBuffer(0)
-	valueSize := 100
+	valueSize := gValueSize
 
 	start := time.Now()
 	tx, err := db.Begin()
@@ -128,7 +131,7 @@ func benchLevelDB() {
 	nums := gNum
 
 	keyBuffer := NewKeyBuffer(0)
-	valueSize := 100
+	valueSize := gValueSize
 
 	start := time.Now()
 
@@ -146,9 +149,43 @@ func benchLevelDB() {
 	fmt.Printf("%s consums: %d ms, bytes: %d, rate: %.2f MB/s\n", "leveldb_bench", el, bytes, utils.ComputeRates(bytes, el))
 }
 
+func benchPebbleDB() {
+	db := pebbledb_bench.NewPebbleDB()
+
+	gen := utils.NewRandomGenerator()
+
+	rnd := utils.NewRandom(1)
+	nums := gNum
+
+	keyBuffer := NewKeyBuffer(0)
+	valueSize := gValueSize
+
+	start := time.Now()
+
+	var bytes int64
+	b := db.NewBatch()
+	for i := 0; i < nums; i++ {
+		k := rnd.Uniform(nums)
+		keyBuffer.Set(int(k))
+		if err := b.Set(keyBuffer.Slice(), gen.Generate(valueSize), nil); err != nil {
+			panic(err)
+		}
+		bytes += int64(valueSize + len(keyBuffer.Slice()))
+	}
+
+	el := time.Since(start).Milliseconds()
+	if err := b.Commit(nil); err != nil {
+		panic(err)
+	}
+	fmt.Printf("%s_bench consums: %d ms, bytes: %d, rate: %.2f MB/s\n", gDB, el, bytes, utils.ComputeRates(bytes, el))
+
+}
+
 func main() {
 	flag.StringVar(&gDB, "db", "boltdb", "specify kv_engine name")
 	flag.IntVar(&gNum, "num", 100000, "specify how many w/r calls to db")
+	flag.IntVar(&gValueSize, "value_size", 100, "usage specify value_size")
+	flag.IntVar(&gKeySize, "key_size", 16, "usage specify value_size")
 	flag.Parse()
 
 	switch gDB {
@@ -158,6 +195,8 @@ func main() {
 		benchNutsDB()
 	case "leveldb":
 		benchLevelDB()
+	case "pebbledb":
+		benchPebbleDB()
 	default:
 		log.Fatalf("%s db not supported", gDB)
 	}
